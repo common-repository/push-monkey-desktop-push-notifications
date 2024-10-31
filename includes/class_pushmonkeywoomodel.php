@@ -1,0 +1,92 @@
+<?php
+
+/* WordPress Check */
+if ( ! defined( 'ABSPATH' ) ) 
+{
+	exit;
+}
+
+/**
+ * Push Monkey model for push monkey.
+ */
+
+class PushMonkeyWooModels extends PushMonkey {
+
+	/**
+	 * Call actions.
+	 */
+	public function add_actions() {
+		add_filter( 'woocommerce_cart_id', array( $this,'filter_wc_cart_id'), 10, 5 );
+		add_action( 'woocommerce_add_to_cart', array( $this,  'add_to_cart_hook' ) );
+		add_action( 'woocommerce_order_status_completed', array( $this,  'update_cart_hook' ) );
+		add_action( 'woocommerce_checkout_update_order_meta', array( $this, 'action_woocommerce_checkout_update_order_meta' ), 10, 2 );
+		add_action( 'woocommerce_update_product', array( $this, 'product_update'), 10, 1 );
+		add_action( 'draft_to_publish', array( $this, 'product_update' ));
+	}
+
+	/**
+	 * Update product status.
+	 */
+	public function product_update( $product_id ) {
+		if ( class_exists( 'woocommerce' ) ) {
+			$product = wc_get_product( $product_id );
+			$product = wc_get_product( $product_id );
+			if ( $product ) {
+				$product_id= $product->get_id();
+				$product_name= $product->get_name();
+				$product_price= $product->get_price();
+				$product_stock_status= $product->get_stock_status();
+				$pushmonkey = new PushMonkey();
+				$api_token = $pushmonkey->account_key();
+				//Update cart if key is not empty.
+				if($product_id!= '' ) {
+					$response = $pushmonkey->apiClient->product($product_id, $api_token,$product_name,$product_price,$product_stock_status );
+				}
+			}
+		}
+	}
+	public function filter_wc_cart_id ( $cart_id, $product_id, $variation_id, $variation, $cart_item_data ) {
+		$cart_id = substr( $cart_id, 1, 9 ).strtotime( 'now' ).mt_rand( 10, 9999 );
+		return $cart_id;
+	}
+
+	public function add_to_cart_hook( $key ) {
+		global $woocommerce;
+		$pushmonkey = new PushMonkey();
+		$api_token = $pushmonkey->account_key();
+		if( $pushmonkey->has_account_key() ) {
+			$response = $pushmonkey->apiClient->create_cart( $key, $api_token );
+			WC()->session->set( '_push_monkey', $key );
+			wc_setcookie( '_push_monkey_wc_cart_id', $key, time()+60*60*24*5 );
+		}
+		return $key;
+	}
+
+	public function update_cart_hook( $order_id ) {
+		global $woocommerce;
+		$order = new WC_order( $order_id );
+		$key = get_post_meta( $order_id, '_cart_id', true );
+		$pushmonkey = new PushMonkey();
+		$api_token = $pushmonkey->account_key();
+        //Update cart if key is not empty.
+		if( $key != '' ) {
+			$response = $pushmonkey->apiClient->update_cart( $key, $api_token );
+		}
+	}
+
+	public function action_woocommerce_checkout_update_order_meta( $order_id ) {
+
+		$key = WC()->session->get( '_push_monkey' );
+		update_post_meta( $order_id, '_cart_id', $key );
+		wc_setcookie( '_push_monkey_wc_cart_id', '', -1 );                
+	}
+
+	/* Private */
+
+	function __construct() {
+
+		$this->add_actions();
+	}    
+}
+
+$push_monkey_wc = new PushMonkeyWooModels();
